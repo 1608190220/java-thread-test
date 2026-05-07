@@ -209,7 +209,7 @@ public class AQSPrincipleDemo {
                     mutex.lock(); // 获取锁（如果被占用则进入 AQS 等待队列）
 
                     log("任务-" + taskId + " 获得了锁，正在执行临界区代码...");
-                    Thread.sleep(200); // 模拟耗时操作
+                    Thread.sleep(2000); // 模拟耗时操作
 
                     log("任务-" + taskId + " 即将释放锁");
                 } catch (InterruptedException e) {
