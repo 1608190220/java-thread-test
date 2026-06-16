@@ -10,7 +10,7 @@
 - Maven：3.9+
 - 源码编码：UTF-8
 
-> 项目包含 `StructuredTaskScope` 示例。`StructuredTaskScope` 在 JDK 21 中仍是 Preview API，编译和运行相关示例都需要 `--enable-preview`。当前 `pom.xml` 已在 `maven-compiler-plugin` 中配置 `--enable-preview`。
+> 项目包含 `StructuredTaskScope` 和 `ScopedValue` 示例。它们在 JDK 21 中仍是 Preview API，编译和运行相关示例都需要 `--enable-preview`。当前 `pom.xml` 已在 `maven-compiler-plugin` 中配置 `--enable-preview`。
 
 ## 2. 项目结构
 
@@ -38,12 +38,14 @@ src/main/java/com/example/multithread
 │   └── accumulator          LongAccumulator / DoubleAdder / DoubleAccumulator
 ├── completablefuture        CompletableFuture 异步编排
 ├── threadlocal              ThreadLocal 上下文隔离与污染风险
+├── threadlocalrandom        ThreadLocalRandom 与 Random 多线程竞争对比
 ├── memory                   happens-before / JMM
 │   └── jmm                  JMM 可见性规则专题
 ├── flow                     Flow / SubmissionPublisher
 │   └── submissionpublisher  响应式流发布订阅示例
 ├── scheduled                ScheduledExecutorService 定时任务
 ├── virtualthread            JDK 21 虚拟线程
+├── scopedvalue              JDK 21 ScopedValue Preview（java.lang）
 ├── structuredconcurrency    JDK 21 结构化并发 Preview
 ├── forkjoin                 ForkJoinPool、RecursiveTask、RecursiveAction、CountedCompleter
 └── principle                CAS / AQS 底层原理示例
@@ -272,7 +274,27 @@ java -cp target/classes com.example.multithread.completablefuture.PriceCompariso
 java -cp target/classes com.example.multithread.threadlocal.TraceContextDemo
 ```
 
-### 4.12 happens-before / JMM：`memory`
+### 4.12 ThreadLocalRandom：`threadlocalrandom`
+
+| 示例类 | 核心知识点 | 适合观察 |
+| --- | --- | --- |
+| `ThreadLocalRandomBasicDemo` | `ThreadLocalRandom.current()`、区间随机数、随机退避、禁止手动 `setSeed` | 多线程业务随机数的推荐写法，以及它和 `SecureRandom` 的适用边界 |
+| `RandomContentionComparisonDemo` | 共享 `Random`、`ThreadLocalRandom`、多线程种子竞争、吞吐对比 | 多线程同时生成随机数时，共享随机状态与线程本地随机状态的竞争差异 |
+
+```bash
+java -cp target/classes com.example.multithread.threadlocalrandom.ThreadLocalRandomBasicDemo
+java -cp target/classes com.example.multithread.threadlocalrandom.RandomContentionComparisonDemo
+```
+
+ThreadLocalRandom 重点观察：
+
+1. `ThreadLocalRandom` 通过 `ThreadLocalRandom.current()` 获取，不需要也不能手动创建实例。
+2. `nextInt(origin, bound)` 等区间方法是左闭右开区间，适合生成业务范围内的随机值。
+3. 多线程共享同一个 `Random` 时会争用同一个随机状态更新点，`ThreadLocalRandom` 通常能降低这种竞争。
+4. `ThreadLocalRandom` 不适合验证码、token、密钥等安全敏感随机数；这些场景应使用 `SecureRandom`。
+5. `RandomContentionComparisonDemo` 是教学观察，不是严谨基准测试；严肃性能结论应使用 JMH。
+
+### 4.13 happens-before / JMM：`memory`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
@@ -289,7 +311,7 @@ JMM 重点观察：
 3. 一个线程内的所有操作 happens-before 其他线程成功从该线程的 `join()` 返回。
 4. JMM 示例重点是建立正确规则，不建议依赖“偶发复现”的可见性 bug 作为稳定教学输出。
 
-### 4.13 Flow / SubmissionPublisher：`flow`
+### 4.14 Flow / SubmissionPublisher：`flow`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
@@ -306,7 +328,7 @@ Flow 重点观察：
 3. `request(n)` 是响应式流背压入口，消费者可以按自身处理能力逐步请求数据。
 4. `onComplete` 表示发布者已关闭并且数据发送完毕，`onError` 表示流处理失败。
 
-### 4.14 定时任务：`scheduled`
+### 4.15 定时任务：`scheduled`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
@@ -316,17 +338,27 @@ Flow 重点观察：
 java -cp target/classes com.example.multithread.scheduled.HealthCheckSchedulerDemo
 ```
 
-### 4.15 虚拟线程：`virtualthread`
+### 4.16 虚拟线程：`virtualthread`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
 | `VirtualThreadApiAggregationDemo` | JDK 21 虚拟线程、每任务一个虚拟线程、`Thread.ofVirtual` | 虚拟线程创建方式、适合 IO 阻塞型任务的并发模型 |
+| `VirtualThreadThreadLocalCostDemo` | 虚拟线程下 `ThreadLocal` 成本、隐式上下文、显式参数替代 | 每个虚拟线程写入 ThreadLocal 时的对象分配成本，以及显式传参的可维护性优势 |
 
 ```bash
 java -cp target/classes com.example.multithread.virtualthread.VirtualThreadApiAggregationDemo
+java -cp target/classes com.example.multithread.virtualthread.VirtualThreadThreadLocalCostDemo
 ```
 
-### 4.16 Fork/Join：`forkjoin`
+虚拟线程与 ThreadLocal 重点观察：
+
+1. 虚拟线程很轻量，但放进 `ThreadLocal` 的业务对象不会变轻，仍然会占用真实堆内存。
+2. 虚拟线程通常不复用，线程池串号风险比平台线程池低，但大量虚拟线程各自持有上下文仍会带来总量成本。
+3. `ThreadLocal` 是隐式依赖，调用链越深越难看出上下文来源；普通业务代码优先考虑显式传参。
+4. 请求级只读上下文可以关注 `ScopedValue`，但在 JDK 21 中它仍是 Preview API。
+5. 日志 MDC 等框架生态可能仍依赖 `ThreadLocal`，使用时应控制值的大小，并保留 `finally remove` 的习惯。
+
+### 4.17 Fork/Join：`forkjoin`
 
 | 子包 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- | --- |
@@ -348,7 +380,25 @@ java -cp target/classes com.example.multithread.forkjoin.commonpool.CommonPoolDe
 java -cp target/classes com.example.multithread.forkjoin.managedblocker.ManagedBlockerDemo
 ```
 
-### 4.17 结构化并发：`structuredconcurrency`
+### 4.18 ScopedValue：`scopedvalue`
+
+| 示例类 | 核心知识点 | 适合观察 |
+| --- | --- | --- |
+| `ScopedValuePreviewDemo` | `java.lang.ScopedValue`、作用域绑定、只读上下文、结构化并发上下文读取 | `where(...).run(...)` 进入和离开作用域时上下文如何自动绑定与失效 |
+
+```bash
+java --enable-preview -cp target/classes com.example.multithread.scopedvalue.ScopedValuePreviewDemo
+```
+
+ScopedValue 重点观察：
+
+1. `ScopedValue` 位于 `java.lang`，不属于 `java.util.concurrent`，但它和现代 Java 并发上下文传递关系很密切。
+2. 它适合请求级、只读、短生命周期上下文，例如 `traceId`、`tenantId`、`userId`。
+3. 相比 `ThreadLocal`，`ScopedValue` 不通过 `set/remove` 管理生命周期，而是通过词法作用域自动进入和退出。
+4. 在 JDK 21 中 `ScopedValue` 是 Preview API，编译和运行都需要 `--enable-preview`。
+5. 如果项目目标是“JDK 21 并发全景”，它值得加入，因为它代表了 ThreadLocal 上下文传递的一条重要替代路线。
+
+### 4.19 结构化并发：`structuredconcurrency`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
@@ -362,7 +412,7 @@ java --enable-preview -cp target/classes com.example.multithread.structuredconcu
 java --enable-preview -cp target/classes com.example.multithread.structuredconcurrency.ShutdownOnSuccessDemo
 ```
 
-### 4.18 并发底层原理：`principle`
+### 4.20 并发底层原理：`principle`
 
 | 示例类 | 核心知识点 | 适合观察 |
 | --- | --- | --- |
@@ -385,9 +435,10 @@ java -cp target/classes com.example.multithread.principle.AQSPrincipleDemo
 7. 接着看 `concurrentcollection`，对比有序并发集合和 CopyOnWrite 集合各自适合的读写模型。
 8. 再看 `lock`，对比 `synchronized`、`Lock`、`ReadWriteLock`、`StampedLock` 各自解决的问题。
 9. 接着看 `atomic` 和 `principle`，从原子计数、原子引用、原子数组、标记引用、累加器过渡到 CAS / AQS 原理，理解 JUC 的底层支撑。
-10. 单独看 `memory`，用 happens-before 规则理解可见性和有序性问题。
-11. 再看 `forkjoin`，理解分治任务、工作窃取、公共池和阻塞补偿机制。
-12. 最后看 `CompletableFuture`、`flow`、虚拟线程和结构化并发，理解现代 Java 中更适合业务编排、发布订阅和高并发 IO 的写法。
+10. 单独看 `threadlocalrandom`，理解多线程随机数生成为什么优先使用 `ThreadLocalRandom`，以及它和共享 `Random` 的竞争差异。
+11. 单独看 `memory`，用 happens-before 规则理解可见性和有序性问题。
+12. 再看 `forkjoin`，理解分治任务、工作窃取、公共池和阻塞补偿机制。
+13. 最后看 `CompletableFuture`、`flow`、虚拟线程、`ScopedValue` 和结构化并发，理解现代 Java 中更适合业务编排、发布订阅、高并发 IO 和请求上下文传递的写法。
 
 ## 6. 观察与实验建议
 
